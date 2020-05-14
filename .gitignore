@@ -1,0 +1,15 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/expression
+expression.so
+expression.dylib
+expression.dll
+expression.a
+expression.lib
+expression-test-*
+*.exe
+*.o
+*.obj
+*.lst

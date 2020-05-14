@@ -1,0 +1,10 @@
+{
+    "authors": [
+        "Jack Applegame"
+    ],
+    "copyright": "Copyright © 2020, Jack Applegame",
+    "description": "Simple expression evaluator",
+    "license": "MIT",
+    "name": "expression",
+    "targetType": "library",
+}
