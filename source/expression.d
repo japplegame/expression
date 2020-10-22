@@ -68,6 +68,13 @@ struct Expression(V) if(isFloatingPoint!V) {
     template opDispatch(string name) {
         void opDispatch(V)(V value) { this[name] = value; }
     }
+    
+    auto variables() {
+        return m_context.variables.map!(v=>v.name);
+    }
+    auto functions() {
+        return m_context.functions.map!(v=>v.name);
+    }
 
     private {
         Node!V m_root;
