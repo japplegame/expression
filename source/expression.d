@@ -22,8 +22,8 @@ class ExpressionError : Exception {
     }
 }
 
-struct Expression(V) if(isFloatingPoint!V) {
-    this() @disable;
+struct Expression(V) {
+    @disable this();
 
     this(R)(R source) if(isInputRange!R && isSomeChar!(ElementType!R)) {
         auto src = Source!R(source);
@@ -68,15 +68,11 @@ struct Expression(V) if(isFloatingPoint!V) {
     template opDispatch(string name) {
         void opDispatch(V)(V value) { this[name] = value; }
     }
-    
-    auto variables() {
-        return m_context.variables.map!(v=>v.name);
-    }
-    auto functions() {
-        return m_context.functions.map!(v=>v.name);
-    }
 
-    private {
+    auto variables() { return m_context.variables.map!(v=>v.name); }
+    auto functions() { return m_context.functions.map!(v=>v.name); }
+
+    private:
         Node!V m_root;
         Context!V m_context;
         bool m_validated = false;
@@ -92,7 +88,6 @@ struct Expression(V) if(isFloatingPoint!V) {
                 m_validated = true;
             }
         }
-    }
 }
 
 Expression!V compileExpression(R, V = float)(R source) {
@@ -168,7 +163,8 @@ Node!V compileValue(R, V)(ref Source!R src, ref Context!V ctx) {
     if(isNumber(src.front)) {
         // literal
         return new Literal!V(parse!V(src));
-    } else if(isAlpha(src.front)) {
+    }
+    if(isAlpha(src.front)) {
         // identifier
         string identifier = {
             dchar[] result;
@@ -202,20 +198,21 @@ Node!V compileValue(R, V)(ref Source!R src, ref Context!V ctx) {
             // variable
             return ctx.defineVariable(identifier);
         }
-    } else if(src.front == '-') {
+    }
+    if(src.front == '-') {
         // unary minus
         src.popFront();
         return new Unary!(V, "-")(compileValue(src, ctx));
-    } else if(src.front == '(') {
+    }
+    if(src.front == '(') {
         src.popFront();
         auto expr = compileExpr(src, ctx);
         skipWS(src);
         if(src.front != ')') throw new ExpressionError(src, "closing parenthesis expected");
         src.popFront();
         return expr;
-    } else {
-        throw new ExpressionError(src, "value expected");
     }
+    throw new ExpressionError(src, "value expected");
 }
 
 void skipWS(R)(ref Source!R src) {
@@ -267,7 +264,7 @@ class Binary(V, string op) : Node!V {
     this(Node a, Node b) { m_args = [a, b]; }
     V opCall() const {
         V result = mixin(`m_args[0]() ` ~ op ~ ` m_args[1]()`);
-        static if(op == "/") {
+        static if(isFloatingPoint!V && op == "/") {
             if(result.isInfinity) throw new ExpressionError("division by zero");
         }
         return result;
@@ -320,7 +317,6 @@ class Function(V) : Node!V {
 
 version(unittest) import std.math : isClose, sqrt;
 unittest {
-
     float result = {
         float a = 3.2;
         float b = 9.6;
@@ -342,4 +338,24 @@ unittest {
 
     assert(expr("dist(sqrt(a),b)*(a+5.8)/3+b/a-(235.6+3*b)/-2.5+dist(a)").isClose(result));
     assert(expr("dist ( sqrt ( a ) , b ) * ( a + 5.8 ) / 3 + b / a - ( 235.6 + 3 * b) / - 2.5 + dist ( a )").isClose(result));
+}
+
+unittest {
+
+    int result = {
+        int a = 3;
+        int b = 9;
+        auto sqr = (int x) => x*x;
+        return ((a - 3) * b + 1) * (a + 5)/3 + b/a - (235 + 3 * b) / -2 + sqr(a);
+    }();
+
+    auto expr(string source) {
+        auto e = compileExpression!(string, int)(source);
+        e["a"] = 3;
+        e.b = 9;
+        e["sqr"] = (int x) => x*x;
+        return e();
+    }
+
+    assert(expr("((a - 3) * b + 1) * (a + 5)/3 + b/a - (235 + 3 * b) / -2 + sqr(a)") == result);
 }
