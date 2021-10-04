@@ -1,7 +1,7 @@
 module expression;
 
 import std.algorithm : map, find;
-import std.conv : parse;
+import std.conv : parse, to;
 import std.format : formattedWrite;
 import std.math : isInfinity;
 import std.meta : AliasSeq;
@@ -9,7 +9,7 @@ import std.range : ElementType, iota, isInputRange, repeat;
 import std.string : format, join;
 import std.traits : arity, isSomeChar, isFloatingPoint;
 import std.typecons : Nullable;
-import std.uni : isAlpha, isAlphaNum, isNumber, isWhite;;
+import std.uni : isAlpha, isAlphaNum, isNumber, isWhite;
 import std.utf : toUTF8;
 
 class ExpressionError : Exception {
@@ -18,7 +18,7 @@ class ExpressionError : Exception {
     }
 
     this(S)(ref const S source, string msg, string file = __FILE__, size_t line = __LINE__) {
-        super(format("%s (%s)", msg, source.pos + 1), file, line);
+        super("%s (%s)".format(msg, source.pos + 1), file, line);
     }
 }
 
@@ -46,31 +46,30 @@ struct Expression(V) {
     }
 
     void opIndexAssign(V value, string name) {
-        foreach(v; m_context.variables) {
-            if(v.name == name) { v.set(value); return; }
-        }
-        throw new ExpressionError(format!"undefined variable (%s)"(name));
+        auto p = name in m_context.variables;
+        if (p is null)
+            throw new ExpressionError("undefined variable: " ~ name);
+        (*p).set(value);
     }
 
     void opIndexAssign(F)(F fn, string name) {
-        {
-            // check function type;
-            mixin("alias VS = AliasSeq!(" ~ "V.init".repeat(arity!F).join(",") ~ ");");
-            V v;
-            static assert(__traits(compiles, v = fn(VS)), format!"invalid function type (%s)"(F.stringof));
-        }
-        foreach(f; m_context.functions) {
-            if(f.name == name && f.arity == arity!F) { f.set(fn); return; }
-        }
-        throw new ExpressionError(format!"undefined function (%s/%s)"(name, arity!F));
+        // check function type;
+        mixin("alias VS = AliasSeq!(" ~ "V.init".repeat(arity!F).join(",") ~ ");");
+        V v;
+        static assert(__traits(compiles, v = fn(VS)), "invalid function type:" ~ F.stringof);
+
+        auto p = (name ~= arity!F.to!string) in m_context.functions;
+        if (p is null)
+            throw new ExpressionError(format!"undefined function (%s/%s)"(name, arity!F));
+        (*p).set(fn);
     }
 
     template opDispatch(string name) {
         void opDispatch(V)(V value) { this[name] = value; }
     }
 
-    auto variables() { return m_context.variables.map!(v=>v.name); }
-    auto functions() { return m_context.functions.map!(v=>v.name); }
+    auto variables() { return m_context.variables.keys; }
+    auto functions() { return m_context.functions.keys; }
 
     private:
         Node!V m_root;
@@ -79,11 +78,11 @@ struct Expression(V) {
 
         void validate() {
             if(!m_validated) {
-                foreach(var; m_context.variables) {
-                    if(!var.isSet) throw new ExpressionError(format!"uninitialized variable (%s)"(var.name));
+                foreach(var; m_context.variables.values) {
+                    if(!var.isSet) throw new ExpressionError("uninitialized variable: " ~ var.name);
                 }
-                foreach(fn; m_context.functions) {
-                    if(!fn.isSet) throw new ExpressionError(format!"uninitialized function (%s)"(fn.name));
+                foreach(fn; m_context.functions.values) {
+                    if(!fn.isSet) throw new ExpressionError("uninitialized function: " ~ fn.name);
                 }
                 m_validated = true;
             }
@@ -97,19 +96,20 @@ Expression!V compileExpression(R, V = float)(R source) {
 private:
 
 struct Context(V) {
-    Variable!V[] variables;
-    Function!V[] functions;
+    Variable!V[string] variables;
+    Function!V[string] functions;
     auto defineVariable(string identifier) {
-        foreach(v; variables) if(v.name == identifier) return v;
-        auto v = new Variable!V(identifier);
-        variables ~= v;
-        return v;
+        auto p = identifier in variables;
+        if(p !is null)
+            return *p;
+        return variables[identifier] = new Variable!V(identifier);
     }
     auto defineFunction(string identifier, Node!V[] args...) {
-        foreach(f; functions) if(f.name == identifier && f.arity == args.length) return f;
-        auto f = new Function!V(identifier, args);
-        functions ~= f;
-        return f;
+        identifier ~= args.length.to!string;
+        auto p = identifier in functions;
+        if(p !is null)
+            return *p;
+        return functions[identifier] = new Function!V(identifier, args);
     }
 }
 
@@ -166,14 +166,12 @@ Node!V compileValue(R, V)(ref Source!R src, ref Context!V ctx) {
     }
     if(isAlpha(src.front)) {
         // identifier
-        string identifier = {
-            dchar[] result;
-            while(!src.empty && isAlphaNum(src.front)) {
-                result ~= src.front;
-                src.popFront();
-            }
-            return result.toUTF8();
-        }();
+        dchar[] result;
+        while(!src.empty && isAlphaNum(src.front)) {
+            result ~= src.front;
+            src.popFront();
+        }
+        string identifier = result.toUTF8();
 
         skipWS(src);
         if(!src.empty && src.front == '(') {
@@ -186,7 +184,7 @@ Node!V compileValue(R, V)(ref Source!R src, ref Context!V ctx) {
                     src.popFront();
                     return ctx.defineFunction(identifier, args);
                 }
-                if(args.length > 0) {
+                if(args.length) {
                     if(src.front != ',') throw new ExpressionError(src, "comma expected");
                     src.popFront();
                 }
@@ -238,7 +236,7 @@ interface Node(V) {
 }
 
 class Literal(V) : Node!V {
-    private V m_value;
+    protected V m_value;
     this(V value) { m_value = value; }
     V opCall() const { return m_value; }
     const(Node)[] children() const { return null; }
@@ -252,7 +250,7 @@ unittest {
 }
 
 class Unary(V, string op) : Node!V {
-    private Node m_arg;
+    protected Node m_arg;
     this(Node a) { m_arg = a; }
     V opCall() const { return mixin(op ~ `m_arg()`); }
     const(Node)[] children() const { return [m_arg]; }
@@ -260,7 +258,7 @@ class Unary(V, string op) : Node!V {
 }
 
 class Binary(V, string op) : Node!V {
-    private Node[2] m_args;
+    protected Node[2] m_args;
     this(Node a, Node b) { m_args = [a, b]; }
     V opCall() const {
         V result = mixin(`m_args[0]() ` ~ op ~ ` m_args[1]()`);
@@ -274,7 +272,7 @@ class Binary(V, string op) : Node!V {
 }
 
 class Variable(V) : Node!V {
-    private {
+    protected {
         string m_name;
         Nullable!V m_value;
     }
@@ -284,11 +282,11 @@ class Variable(V) : Node!V {
     void set(V value) { m_value = value; }
     bool isSet() const { return !m_value.isNull; }
     const(Node)[] children() const { return null; }
-    override string toString() const { return format!"Variable(%s)"(m_name); }
+    override string toString() const { return "Variable(" ~ m_name ~ ")"; }
 }
 
 class Function(V) : Node!V {
-    private {
+    protected {
         string m_name;
         V delegate() m_fn;
         Node[] m_args;
@@ -302,10 +300,10 @@ class Function(V) : Node!V {
     size_t arity() const { return m_args.length; }
 
     void set(F)(F fn) {
-        enum fna = .arity!fn;
-        assert(fna == m_args.length, "wrong arity");
-        enum params = iota(0, fna).map!(i => format!"m_args[%s]()"(i)).join(", ");
-        m_fn = { return mixin("fn(" ~ params ~ ")"); };
+        enum fna = .arity!F;
+        assert(fna == m_args.length, format!"%s wrong arity: %s/%s"(m_name, fna, m_args.length));
+        enum params = iota(0, fna).map!(i => format!"m_args[%s]()"(i)).join(",");
+        m_fn = () => mixin("fn(" ~ params ~ ")");
     }
 
     V opCall() const { return m_fn(); }
