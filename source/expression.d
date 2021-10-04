@@ -89,7 +89,7 @@ struct Expression(V) {
         }
 }
 
-Expression!V compileExpression(R, V = float)(R source) {
+Expression!V compileExpression(V = float, R)(R source) {
     return Expression!V(source);
 }
 
@@ -236,11 +236,11 @@ interface Node(V) {
 }
 
 class Literal(V) : Node!V {
-    protected V m_value;
-    this(V value) { m_value = value; }
-    V opCall() const { return m_value; }
+    protected V m_val;
+    this(V value) { m_val = value; }
+    V opCall() const { return m_val; }
     const(Node)[] children() const { return null; }
-    override string toString() const { return format!"Literal(%s)"(m_value); }
+    override string toString() const { return "Literal(" ~ m_val.to!string ~ ")"; }
 }
 
 unittest {
@@ -262,8 +262,10 @@ class Binary(V, string op) : Node!V {
     this(Node a, Node b) { m_args = [a, b]; }
     V opCall() const {
         V result = mixin(`m_args[0]() ` ~ op ~ ` m_args[1]()`);
-        static if(isFloatingPoint!V && op == "/") {
-            if(result.isInfinity) throw new ExpressionError("division by zero");
+        version(AllowDivisionBy0) {} else {
+            static if(isFloatingPoint!V && op == "/") {
+                if(result.isInfinity) throw new ExpressionError("division by zero");
+            }
         }
         return result;
     }
@@ -348,7 +350,7 @@ unittest {
     }();
 
     auto expr(string source) {
-        auto e = compileExpression!(string, int)(source);
+        auto e = compileExpression!int(source);
         e["a"] = 3;
         e.b = 9;
         e["sqr"] = (int x) => x*x;
