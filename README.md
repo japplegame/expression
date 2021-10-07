@@ -33,5 +33,16 @@ void main() {
     expr.y = 4;
 
     writeln("result: ", expr()); // 18
+
+    // integer type
+    int expr2(string source) {
+        auto e = compileExpression!int(source);
+        e.a = 3;
+        e.b = -1;
+        e.s = (int x) => x*x;
+        return e();
+    }
+
+    assert(expr2("((a - 3) * b + 1) * s(b - 1)") == 5);
 }
 ```

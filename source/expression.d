@@ -349,7 +349,7 @@ unittest {
         return ((a - 3) * b + 1) * (a + 5)/3 + b/a - (235 + 3 * b) / -2 + sqr(a);
     }();
 
-    auto expr(string source) {
+    int expr(string source) {
         auto e = compileExpression!int(source);
         e["a"] = 3;
         e.b = 9;
